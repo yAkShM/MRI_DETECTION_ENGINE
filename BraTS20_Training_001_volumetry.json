@@ -1,0 +1,19 @@
+{
+    "volumes_cm3": {
+        "whole_tumor": 176.334,
+        "tumor_core": 176.334,
+        "enhancing_tumor": 37.41,
+        "peritumoral_edema": 0.0
+    },
+    "voxel_counts": {
+        "wt": 176334,
+        "tc": 49181,
+        "et": 37410
+    },
+    "clinical_metrics": {
+        "enhancing_fraction_pct": 21.22,
+        "core_to_whole_ratio_pct": 100.0,
+        "peak_axial_slice_idx": 57
+    },
+    "patient_id": "BraTS20_Training_001"
+}
