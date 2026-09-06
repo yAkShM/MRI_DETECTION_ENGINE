@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+      - "11112:11112"
+    volumes:
+      - ./weights:/app/weights
+      - ./checkpoints:/app/checkpoints
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - medtech-net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8501:8501"
+    volumes:
+      - ../BRATS/BraTS2020_Processed:/app/processed_data
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - PROCESSED_DIR=/app/processed_data
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - medtech-net
+
+networks:
+  medtech-net:
+    driver: bridge

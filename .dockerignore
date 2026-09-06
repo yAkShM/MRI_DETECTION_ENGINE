@@ -1,0 +1,11 @@
+.git
+.venv
+__pycache__
+*.pt
+*.pth
+*.log
+output/
+staging/
+volumetric_report.json
+checkpoints/
+weights/

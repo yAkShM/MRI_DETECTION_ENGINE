@@ -82,3 +82,11 @@ logs/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Project specific
+output/
+staging/
+weights/
+*.zip
+*_volumetry.json
+volumetric_report.json

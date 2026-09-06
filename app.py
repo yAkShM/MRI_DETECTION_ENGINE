@@ -4,12 +4,10 @@ import json
 import tempfile
 import numpy as np
 import torch
+import requests
 import streamlit as st
 from PIL import Image
 from fpdf import FPDF
-
-from model import Unet3D
-from volumetry import compute_tumor_volumes
 
 # ---------------------------------------------------------
 # Page Configuration
@@ -21,45 +19,63 @@ st.set_page_config(
 )
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-PROCESSED_DIR = r"C:\Users\HP-PC\OneDrive\Desktop\BRATS\BraTS2020_Processed"
+PROCESSED_DIR = os.getenv("PROCESSED_DIR", r"C:\Users\HP-PC\OneDrive\Desktop\BRATS\BraTS2020_Processed")
 CHECKPOINT_PATH = "checkpoints/best_model.pth"
 
 # ---------------------------------------------------------
-# 1. Critical Caching Engines (Prevents GPU Memory Leaks)
+# 1. API Client Integration
 # ---------------------------------------------------------
-@st.cache_resource
-def load_model(checkpoint_path):
-    """Loads 3D U-Net weights into VRAM strictly ONCE."""
-    model = Unet3D(in_channels=4, out_channels=3).to(DEVICE)
-    ckpt = torch.load(checkpoint_path, map_location=DEVICE, weights_only=True)
-    if "model_state_dict" in ckpt:
-        model.load_state_dict(ckpt["model_state_dict"])
-    else:
-        model.load_state_dict(ckpt)
-    model.eval()
-    return model
-
 @st.cache_data
 def run_patient_inference(patient_pt_path):
     """
-    Runs 3D forward pass ONCE per patient scan.
+    Calls the backend API to get inference mask and volumetry ONCE per patient scan.
     Returns:
         image_np: [4, 128, 128, 128] float32 array
         pred_mask: [3, 128, 128, 128] uint8 binary array
         telemetry: clinical metrics dictionary
     """
-    model = load_model(CHECKPOINT_PATH)
-    data = torch.load(patient_pt_path, map_location=DEVICE, weights_only=False)
-    image_tensor = data["image"].unsqueeze(0).to(DEVICE).float()  # [1, 4, 128, 128, 128]
+    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+    
+    # Load base image for UI display
+    data = torch.load(patient_pt_path, map_location="cpu", weights_only=False)
+    image_np = data["image"].float().numpy()
+    
+    # Get volumetry metrics
+    with open(patient_pt_path, "rb") as f:
+        resp_metrics = requests.post(f"{backend_url}/predict/pt", files={"file": f})
+    
+    if resp_metrics.status_code != 200:
+        st.error(f"API Error (Volumetry): {resp_metrics.text}")
+        st.stop()
+        
+    vol = resp_metrics.json()
+    
+    telemetry = {
+        "volumes_cm3": {
+            "whole_tumor": round(vol["volume_wt_cm3"], 3),
+            "tumor_core": round(vol["volume_tc_cm3"], 3),
+            "enhancing_tumor": round(vol["volume_et_cm3"], 3),
+            "peritumoral_edema": round(max(0.0, vol["volume_wt_cm3"] - vol["volume_tc_cm3"]), 3)
+        },
+        "clinical_metrics": {
+            "enhancing_fraction_pct": round(vol["malignancy_ratio"] * 100.0, 2),
+            "core_to_whole_ratio_pct": round((vol["volume_tc_cm3"] / vol["volume_wt_cm3"] * 100.0) if vol["volume_wt_cm3"] > 0 else 0.0, 2),
+            "peak_axial_slice_idx": vol["peak_slice_idx"]
+        }
+    }
 
-    with torch.no_grad():
-        with torch.amp.autocast('cuda', enabled=(DEVICE.type == 'cuda')):
-            logits = model(image_tensor)
-            probs = torch.sigmoid(logits)
+    # Get binary mask
+    with open(patient_pt_path, "rb") as f:
+        resp_mask = requests.post(f"{backend_url}/predict/pt/mask", files={"file": f})
+        
+    if resp_mask.status_code != 200:
+        st.error(f"API Error (Mask): {resp_mask.text}")
+        st.stop()
+        
+    import io
+    mask_tensor = torch.load(io.BytesIO(resp_mask.content), map_location="cpu", weights_only=False)
+    pred_mask = mask_tensor.numpy()
 
-    pred_mask = (probs[0] > 0.5).byte().cpu().numpy()  # [3, 128, 128, 128]
-    image_np = data["image"].float().cpu().numpy()      # [4, 128, 128, 128]
-    telemetry = compute_tumor_volumes(pred_mask)
     return image_np, pred_mask, telemetry
 
 # ---------------------------------------------------------

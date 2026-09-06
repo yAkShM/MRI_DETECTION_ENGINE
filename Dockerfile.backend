@@ -1,0 +1,46 @@
+FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+
+# Set non-interactive mode for apt-get
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install Python and system dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    build-essential \
+    libgl1 \
+    libglib2.0-0 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Install Python dependencies
+# Using index-url for PyTorch with CUDA 12.1 support
+# Upgrade pip
+RUN pip3 install --no-cache-dir --upgrade pip
+
+# 1. Install PyTorch with CUDA 12.1 wheel index first
+RUN pip3 install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# 2. Install application dependencies from standard PyPI
+RUN pip3 install --no-cache-dir \
+    fastapi \
+    uvicorn \
+    pydantic \
+    pydicom \
+    pynetdicom \
+    scipy \
+    python-multipart \
+    numpy\
+    torch
+# Copy application code
+COPY . /app
+
+# Expose ports
+EXPOSE 8000
+EXPOSE 11112
+
+# Command to run the application
+ENTRYPOINT ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
